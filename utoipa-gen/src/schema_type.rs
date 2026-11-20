@@ -3,7 +3,7 @@ use quote::{quote, ToTokens};
 use syn::spanned::Spanned;
 use syn::{parse::Parse, Error, Ident, LitStr, Path};
 
-use crate::{Diagnostics, ToTokensDiagnostics};
+use crate::token_stream::{Diagnostics, ToTokensDiagnostics};
 
 /// Represents data type of [`Schema`].
 #[cfg_attr(feature = "debug", derive(Debug))]
@@ -13,7 +13,7 @@ pub enum SchemaTypeInner {
     Object,
     /// Indicates string type of content.
     String,
-    /// Indicates integer type of content.    
+    /// Indicates integer type of content.
     Integer,
     /// Indicates floating point number type of content.
     Number,
@@ -70,30 +70,7 @@ impl SchemaType<'_> {
         };
         let name = &*last_segment.ident.to_string();
 
-        #[cfg(not(any(
-            feature = "chrono",
-            feature = "decimal",
-            feature = "decimal_float",
-            feature = "rocket_extras",
-            feature = "uuid",
-            feature = "ulid",
-            feature = "url",
-            feature = "time",
-        )))]
-        {
-            is_primitive(name)
-        }
-
-        #[cfg(any(
-            feature = "chrono",
-            feature = "decimal",
-            feature = "decimal_float",
-            feature = "rocket_extras",
-            feature = "uuid",
-            feature = "ulid",
-            feature = "url",
-            feature = "time",
-        ))]
+        #[allow(unused_mut, reason = "mut is used in conditional compilation")]
         {
             let mut primitive = is_primitive(name);
 
@@ -117,6 +94,11 @@ impl SchemaType<'_> {
                 primitive = matches!(name, "Uuid");
             }
 
+            #[cfg(any(feature = "bigdecimal", feature = "bigdecimal_float"))]
+            if !primitive {
+                primitive = matches!(name, "BigDecimal");
+            }
+
             #[cfg(feature = "ulid")]
             if !primitive {
                 primitive = matches!(name, "Ulid");
@@ -137,7 +119,7 @@ impl SchemaType<'_> {
 
             #[cfg(feature = "jiff_0_2")]
             if !primitive {
-                primitive = matches!(name, "Zoned" | "Date");
+                primitive = matches!(name, "Zoned" | "Date" | "Timestamp");
             }
 
             primitive
@@ -284,6 +266,12 @@ impl ToTokensDiagnostics for SchemaType<'_> {
             #[cfg(feature = "decimal_float")]
             "Decimal" => schema_type_tokens(tokens, SchemaTypeInner::Number, self.nullable),
 
+            #[cfg(feature = "bigdecimal")]
+            "BigDecimal" => schema_type_tokens(tokens, SchemaTypeInner::String, self.nullable),
+
+            #[cfg(feature = "bigdecimal_float")]
+            "BigDecimal" => schema_type_tokens(tokens, SchemaTypeInner::Number, self.nullable),
+
             #[cfg(feature = "rocket_extras")]
             "PathBuf" => schema_type_tokens(tokens, SchemaTypeInner::String, self.nullable),
 
@@ -301,7 +289,9 @@ impl ToTokensDiagnostics for SchemaType<'_> {
                 schema_type_tokens(tokens, SchemaTypeInner::String, self.nullable)
             }
             #[cfg(feature = "jiff_0_2")]
-            "Zoned" => schema_type_tokens(tokens, SchemaTypeInner::String, self.nullable),
+            "Zoned" | "Timestamp" => {
+                schema_type_tokens(tokens, SchemaTypeInner::String, self.nullable)
+            }
             _ => schema_type_tokens(tokens, SchemaTypeInner::Object, self.nullable),
         };
 
@@ -412,6 +402,9 @@ impl KnownFormat {
             #[cfg(feature = "decimal_float")]
             "Decimal" => Self::Double,
 
+            #[cfg(feature = "bigdecimal_float")]
+            "BigDecimal" => Self::Double,
+
             #[cfg(feature = "uuid")]
             "Uuid" => Self::Uuid,
 
@@ -425,7 +418,7 @@ impl KnownFormat {
             "PrimitiveDateTime" | "OffsetDateTime" => Self::DateTime,
 
             #[cfg(feature = "jiff_0_2")]
-            "Zoned" => Self::DateTime,
+            "Zoned" | "Timestamp" => Self::DateTime,
             _ => Self::Unknown,
         };
 
@@ -724,6 +717,16 @@ impl PrimitiveType {
                 syn::parse_quote!(f64)
             }
 
+            #[cfg(feature = "bigdecimal")]
+            "BigDecimal" => {
+                syn::parse_quote!(String)
+            }
+
+            #[cfg(feature = "bigdecimal_float")]
+            "BigDecimal" => {
+                syn::parse_quote!(f64)
+            }
+
             #[cfg(feature = "rocket_extras")]
             "PathBuf" => {
                 syn::parse_quote!(String)
@@ -750,7 +753,7 @@ impl PrimitiveType {
             }
 
             #[cfg(feature = "jiff_0_2")]
-            "Zoned" => {
+            "Zoned" | "Timestamp" => {
                 syn::parse_quote!(String)
             }
             _ => {
